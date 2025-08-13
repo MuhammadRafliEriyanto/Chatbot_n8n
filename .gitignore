@@ -1,0 +1,26 @@
+# Virtual environment
+venv/
+ENV/
+env/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Environment variables
+.env
+
+# VSCode settings
+.vscode/
+
+# Logs
+*.log
+
+# Local database
+*.sqlite3
+*.db
+
+# Instance folder (jika berisi config sensitif)
+instance/
