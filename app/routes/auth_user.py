@@ -1,8 +1,11 @@
 from flask import Blueprint, request, jsonify, url_for, current_app
+import requests
 from app import db, mail
 from app.models.user import User
+from app.models.chatHistory import ChatHistory
 from flask_jwt_extended import create_access_token
 from flask_mail import Message
+from flask_jwt_extended import jwt_required, get_jwt_identity
 from app.utils.decorators import api_key_required, basic_auth_required
 from app.utils.security import (
     hash_password_scrypt,
@@ -12,6 +15,8 @@ from app.utils.security import (
     generate_reset_token,
     confirm_reset_token
 )
+import uuid
+from flask_jwt_extended import create_access_token
 
 auth_user_bp = Blueprint('auth_user', __name__)
 
@@ -75,6 +80,7 @@ def verify_email(token):
     return jsonify({"msg": "Email verified successfully"}), 200
 
 # ===== LOGIN USER =====
+# ===== LOGIN USER =====
 @auth_user_bp.route('/login', methods=['POST'])
 @api_key_required
 @basic_auth_required
@@ -91,13 +97,24 @@ def login_user():
         return jsonify({"msg": "Please verify your email before logging in"}), 403
 
     if verify_password_scrypt(user.password_hash, data['password']):
-        token = create_access_token(identity={'id': user.id, 'type': 'user'})
-        return jsonify(access_token=token), 200
+        # ✅ identity harus string
+        token = create_access_token(identity=str(user.id))
+        
+        # ✅ Buat session_id baru
+        session_id = str(uuid.uuid4())
+
+        return jsonify(
+            access_token=token,
+            session_id=session_id,
+            user_id=user.id,
+            name=user.name
+        ), 200
 
     return jsonify({"msg": "Invalid credentials"}), 401
 
 # ===== FORGOT PASSWORD =====
 @auth_user_bp.route('/forgot-password', methods=['POST'])
+@api_key_required
 def forgot_password():
     data = request.get_json()
     email = data.get("email")
@@ -124,6 +141,7 @@ def forgot_password():
 
 # ===== RESET PASSWORD =====
 @auth_user_bp.route('/reset-password', methods=['POST'])
+@api_key_required
 def reset_password():
     data = request.get_json()
     token = data.get("token")
@@ -144,3 +162,60 @@ def reset_password():
     db.session.commit()
 
     return jsonify({"msg": "Password updated successfully"}), 200
+
+
+N8N_WEBHOOK_URL = "https://n8n.gitstraining.com/webhook-test/chatbot66"
+
+@auth_user_bp.route('/chatbot', methods=['POST'])
+@jwt_required()
+def chat_with_bot():
+    data = request.get_json()
+    message = data.get("message")
+    session_id = data.get("session_id")
+
+    if not message:
+        return jsonify({"msg": "Message is required"}), 400
+
+    identity = get_jwt_identity()
+    user_id = int(identity)
+
+    if not session_id:
+        session_id = str(uuid.uuid4())
+
+    bot_response = "No response"
+    try:
+        # kirim sesuai format yang diterima n8n
+        resp = requests.post(
+            N8N_WEBHOOK_URL,
+            json={
+                "chatInput": message,   # wajib "chatInput"
+                "session_id": session_id,
+                "user_id": user_id
+            },
+            headers={"Content-Type": "application/json"},
+            timeout=10
+        )
+        if resp.ok:
+            resp_json = resp.json()
+            bot_response = resp_json.get("message") or resp_json.get("reply") or "No response"
+        else:
+            bot_response = f"Webhook returned {resp.status_code}"
+    except Exception as e:
+        bot_response = f"Error connecting to webhook: {e}"
+
+    # simpan ke DB
+    chat = ChatHistory(
+        user_id=user_id,
+        session_id=session_id,
+        message=message,
+        response=bot_response
+    )
+    db.session.add(chat)
+    db.session.commit()
+
+    return jsonify({
+        "session_id": session_id,
+        "user_id": user_id,
+        "message": message,
+        "response": bot_response
+    }), 200

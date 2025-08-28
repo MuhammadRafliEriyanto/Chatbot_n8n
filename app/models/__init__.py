@@ -1,1 +1,1 @@
-from app.models import user, admin  # ini akan membuat model terdaftar saat migrate
+from app.models import user, admin,chatHistory  # ini akan membuat model terdaftar saat migrate
