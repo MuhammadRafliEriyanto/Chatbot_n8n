@@ -12,6 +12,10 @@ from app.utils.security_admin import (
     confirm_token
 )
 
+from app.models.chatHistory import ChatHistory
+from flask_jwt_extended import create_access_token, jwt_required, get_jwt, get_jwt_identity
+
+
 auth_admin_bp = Blueprint('auth_admin', __name__)
 
 # ===== ADMIN REGISTER =====
@@ -75,11 +79,14 @@ def login_admin():
         if not admin.is_verified:
             return jsonify({"msg": "Please verify your email before login"}), 403
 
-        access_token = create_access_token(identity={'id': admin.id, 'type': 'admin'})
+        # ✅ identity cukup ID admin (string), role/type taruh di claims
+        access_token = create_access_token(
+            identity=str(admin.id),
+            additional_claims={"type": "admin"}
+        )
         return jsonify(access_token=access_token), 200
 
     return jsonify({"msg": "Invalid credentials"}), 401
-
 
 # ===== VERIFIKASI EMAIL ADMIN =====
 @auth_admin_bp.route('/verify/<token>', methods=['GET'])
@@ -131,3 +138,25 @@ def resend_verification(admin_id):
     mail.send(msg)
 
     return jsonify({"msg": "Verification email resent"}), 200
+
+# ===== GET CHAT HISTORY (ADMIN ONLY) =====
+@auth_admin_bp.route('/chats', methods=['GET'])
+@jwt_required()
+def get_all_chats():
+    claims = get_jwt()  # ambil semua claims dari token
+
+    # ✅ cek role admin dari claims
+    if claims.get("type") != "admin":
+        return jsonify({"msg": "Admins only"}), 403
+
+    chats = ChatHistory.query.order_by(ChatHistory.created_at.desc()).all()
+    return jsonify([
+        {
+            "id": c.id,
+            "user_id": c.user_id,
+            "session_id": c.session_id,
+            "message": c.message,
+            "response": c.response,
+            "created_at": c.created_at.strftime("%Y-%m-%d %H:%M:%S")
+        } for c in chats
+    ]), 200
