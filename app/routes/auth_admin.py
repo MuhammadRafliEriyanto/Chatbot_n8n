@@ -19,6 +19,7 @@ from flask_jwt_extended import create_access_token, jwt_required, get_jwt, get_j
 auth_admin_bp = Blueprint('auth_admin', __name__)
 
 # ===== ADMIN REGISTER =====
+# ===== ADMIN REGISTER =====
 @auth_admin_bp.route('/register', methods=['POST'])
 def register_admin():
     data = request.get_json()
@@ -33,13 +34,14 @@ def register_admin():
         name=data['name'],
         email=data['email'],
         password_hash=hashed_password,
-        is_verified=False
+        is_verified=False,
+        role=data.get("role", "admin")   # ✅ default role = admin
     )
 
     db.session.add(new_admin)
     db.session.commit()
 
-    # Kirim email verifikasi
+    # Kirim email verifikasi...
     try:
         token = generate_confirmation_token(data['email'])
         confirm_url = url_for('auth_admin.verify_email_admin', token=token, _external=True)
@@ -66,7 +68,6 @@ def register_admin():
 
     return jsonify({"msg": "Admin registered successfully. Please check your email to verify your account."}), 201
 
-
 # ===== ADMIN LOGIN =====
 @auth_admin_bp.route('/login', methods=['POST'])
 @api_key_required
@@ -79,10 +80,13 @@ def login_admin():
         if not admin.is_verified:
             return jsonify({"msg": "Please verify your email before login"}), 403
 
-        # ✅ identity cukup ID admin (string), role/type taruh di claims
+        # ✅ identity = ID admin, claims = type + role
         access_token = create_access_token(
             identity=str(admin.id),
-            additional_claims={"type": "admin"}
+            additional_claims={
+                "type": "admin",
+                "role": admin.role
+            }
         )
         return jsonify(access_token=access_token), 200
 
@@ -143,20 +147,27 @@ def resend_verification(admin_id):
 @auth_admin_bp.route('/chats', methods=['GET'])
 @jwt_required()
 def get_all_chats():
-    claims = get_jwt()  # ambil semua claims dari token
+    claims = get_jwt()
 
-    # ✅ cek role admin dari claims
+    # ✅ cek role
     if claims.get("type") != "admin":
         return jsonify({"msg": "Admins only"}), 403
 
+    if claims.get("role") not in ["admin", "superadmin"]:
+        return jsonify({"msg": "Forbidden"}), 403
+
+    # ✅ langsung pakai relasi, ga perlu manual join
     chats = ChatHistory.query.order_by(ChatHistory.created_at.desc()).all()
+
     return jsonify([
         {
             "id": c.id,
             "user_id": c.user_id,
+            "user_name": c.user.name if c.user else None,  # ✅ ambil nama user
             "session_id": c.session_id,
             "message": c.message,
             "response": c.response,
             "created_at": c.created_at.strftime("%Y-%m-%d %H:%M:%S")
         } for c in chats
     ]), 200
+

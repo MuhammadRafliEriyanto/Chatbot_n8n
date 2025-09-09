@@ -80,7 +80,6 @@ def verify_email(token):
     return jsonify({"msg": "Email verified successfully"}), 200
 
 # ===== LOGIN USER =====
-# ===== LOGIN USER =====
 @auth_user_bp.route('/login', methods=['POST'])
 @api_key_required
 @basic_auth_required
@@ -164,7 +163,7 @@ def reset_password():
     return jsonify({"msg": "Password updated successfully"}), 200
 
 
-N8N_WEBHOOK_URL = "https://n8n.gitstraining.com/webhook-test/chatbot66"
+N8N_WEBHOOK_URL = "https://n8n.gitstraining.com/webhook/chatbot66"
 
 @auth_user_bp.route('/chatbot', methods=['POST'])
 @jwt_required()
@@ -184,22 +183,32 @@ def chat_with_bot():
 
     bot_response = "No response"
     try:
-        # kirim sesuai format yang diterima n8n
+        # kirim sesuai format webhook N8N
         resp = requests.post(
             N8N_WEBHOOK_URL,
             json={
-                "chatInput": message,   # wajib "chatInput"
+                "chatInput": message,   # wajib pakai "chatInput"
                 "session_id": session_id,
                 "user_id": user_id
             },
             headers={"Content-Type": "application/json"},
             timeout=10
         )
+
         if resp.ok:
-            resp_json = resp.json()
-            bot_response = resp_json.get("message") or resp_json.get("reply") or "No response"
+            try:
+                resp_json = resp.json()
+                bot_response = (
+                    resp_json.get("message")
+                    or resp_json.get("reply")
+                    or "No response"
+                )
+            except ValueError:
+                # kalau bukan JSON, fallback ke text
+                bot_response = resp.text
         else:
-            bot_response = f"Webhook returned {resp.status_code}"
+            bot_response = f"Webhook returned {resp.status_code}: {resp.text}"
+
     except Exception as e:
         bot_response = f"Error connecting to webhook: {e}"
 
