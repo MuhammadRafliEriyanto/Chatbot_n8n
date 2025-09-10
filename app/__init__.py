@@ -34,5 +34,10 @@ def create_app():
 
     app.register_blueprint(auth_admin_bp, url_prefix='/api/admin')
     app.register_blueprint(auth_user_bp, url_prefix='/api/user')
+    
+      # 🔹 Tambahkan route root untuk health check
+    @app.route('/')
+    def home():
+        return "Chatbot Flask app is running!"
 
     return app
