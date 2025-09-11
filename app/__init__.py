@@ -23,7 +23,7 @@ def create_app():
     migrate.init_app(app, db)
     jwt.init_app(app)
     mail.init_app(app)  # 🔹 Tambahan
-    CORS(app)
+    CORS(app, resources={r"/api/": {"origins": ""}}, supports_credentials=True)
 
     # 🔥 Import semua model agar Flask-Migrate tahu tabel mana yang harus dibuat
     from app.models import user, admin
