@@ -194,7 +194,7 @@ def chat_with_bot():
                 "sessionId": session_id  # pastikan huruf besar "I"
             },
             headers={"Content-Type": "application/json"},
-            timeout=10
+            timeout=30
         )
 
         if resp.ok:
