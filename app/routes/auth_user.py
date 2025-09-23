@@ -170,26 +170,28 @@ N8N_WEBHOOK_URL = "https://n8n.gitstraining.com/webhook/chatbot66"
 def chat_with_bot():
     data = request.get_json()
     message = data.get("message")
-    session_id = data.get("session_id")
-
+    
     if not message:
         return jsonify({"msg": "Message is required"}), 400
 
+    # Ambil identity dari JWT
     identity = get_jwt_identity()
     user_id = int(identity)
 
+    # Cek apakah session_id dikirim, jika tidak buat baru
+    session_id = data.get("session_id")
     if not session_id:
+        # Bisa juga ambil session_id terakhir dari DB jika ingin konsisten
         session_id = str(uuid.uuid4())
 
     bot_response = "No response"
     try:
-        # kirim sesuai format webhook N8N
+        # Kirim ke N8N sesuai format yang workflow harapkan
         resp = requests.post(
             N8N_WEBHOOK_URL,
             json={
-                "chatInput": message,   # wajib pakai "chatInput"
-                "session_id": session_id,
-                "user_id": user_id
+                "chatInput": message,   # field wajib
+                "sessionId": session_id  # pastikan huruf besar "I"
             },
             headers={"Content-Type": "application/json"},
             timeout=10
@@ -198,13 +200,9 @@ def chat_with_bot():
         if resp.ok:
             try:
                 resp_json = resp.json()
-                bot_response = (
-                    resp_json.get("message")
-                    or resp_json.get("reply")
-                    or "No response"
-                )
+                # ambil message dari N8N
+                bot_response = resp_json.get("message") or resp_json.get("reply") or "No response"
             except ValueError:
-                # kalau bukan JSON, fallback ke text
                 bot_response = resp.text
         else:
             bot_response = f"Webhook returned {resp.status_code}: {resp.text}"
@@ -212,7 +210,7 @@ def chat_with_bot():
     except Exception as e:
         bot_response = f"Error connecting to webhook: {e}"
 
-    # simpan ke DB
+    # Simpan chat history di DB MySQL
     chat = ChatHistory(
         user_id=user_id,
         session_id=session_id,
