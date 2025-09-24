@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify, url_for
 from app import db, mail
+from sqlalchemy import func
 from app.models.admin import Admin
 from app.models.user import User
 from flask_jwt_extended import create_access_token, jwt_required
@@ -171,3 +172,128 @@ def get_all_chats():
         } for c in chats
     ]), 200
 
+@auth_admin_bp.route("/chats/per-day", methods=["GET"])
+def chats_per_day():
+    results = (
+        db.session.query(
+            func.date(ChatHistory.created_at).label("tanggal"),
+            func.count(ChatHistory.id).label("total_chat")
+        )
+        .group_by(func.date(ChatHistory.created_at))
+        .order_by(func.date(ChatHistory.created_at))
+        .all()
+    )
+
+    data = [
+        {"tanggal": str(r.tanggal), "total_chat": r.total_chat}
+        for r in results
+    ]
+    return jsonify(data)
+
+
+@auth_admin_bp.route("/chats/per-hour", methods=["GET"])
+def chats_per_hour():
+    results = (
+        db.session.query(
+            func.extract("hour", ChatHistory.created_at).label("jam"),
+            func.count(ChatHistory.id).label("total_chat")
+        )
+        .group_by("jam")
+        .order_by("jam")
+        .all()
+    )
+
+    data = [
+        {"jam": int(r.jam), "total_chat": r.total_chat}
+        for r in results
+    ]
+    return jsonify(data)
+
+
+@auth_admin_bp.route("/chats/guest-vs-registered", methods=["GET"])
+def guest_vs_registered():
+    results = (
+        db.session.query(
+            User.is_verified, 
+            func.count(ChatHistory.id).label("total_chat")
+        )
+        .join(User, User.id == ChatHistory.user_id)
+        .group_by(User.is_verified)
+        .all()
+    )
+
+    data = [
+        {
+            "kategori": "Registered" if r.is_verified else "Guest",
+            "total_chat": r.total_chat
+        }
+        for r in results
+    ]
+    return jsonify(data)
+
+
+
+@auth_admin_bp.route("/customer/wa", methods=["GET"])
+def get_customer():
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM customer;")
+    rows = cursor.fetchall()
+    colnames = [desc[0] for desc in cursor.description]
+    cursor.close()
+    conn.close()
+
+    data = [dict(zip(colnames, row)) for row in rows]
+    return jsonify(data)
+
+
+@auth_admin_bp.route("/history/wa", methods=["GET"])
+def get_history():
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    # 🔹 Join history_wa dengan customer
+    cursor.execute("""
+        SELECT 
+            h.id, 
+            h.session_id, 
+            h.message, 
+            h.created_at,
+            c.customer_id AS customer_id,
+            c.nama AS customer_name,
+            c.email AS customer_email,
+            c.nomor AS customer_phone
+        FROM history_wa h
+        LEFT JOIN customer c ON h.customer_id = c.customer_id
+        ORDER BY h.session_id, h.id
+    """)
+    
+    rows = cursor.fetchall()
+    colnames = [desc[0] for desc in cursor.description]
+    cursor.close()
+    conn.close()
+
+    data = [dict(zip(colnames, row)) for row in rows]
+
+    # 🔹 Group by session_id
+    grouped = {}
+    for row in data:
+        session_id = row["session_id"]
+        if session_id not in grouped:
+            grouped[session_id] = {
+                "session_id": session_id,
+                "customer": {
+                    "customer_id": row["customer_id"],
+                    "nama": row["customer_name"],
+                    "email": row["customer_email"],
+                    "phone": row["customer_phone"]
+                },
+                "history": []
+            }
+        grouped[session_id]["history"].append({
+            "id": row["id"],
+            "message": row["message"],
+            "created_at": row["created_at"]
+        })
+
+    return jsonify(list(grouped.values()))
