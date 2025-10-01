@@ -297,3 +297,79 @@ def get_history():
         })
 
     return jsonify(list(grouped.values()))
+
+@auth_admin_bp.route("/broadcast/add", methods=["POST"])
+def add_broadcast():
+    data = request.get_json()
+    customer_ids = data.get("customer_ids", [])
+    message = data.get("message")
+
+    if not customer_ids:
+        return jsonify({"success": False, "message": "Customer harus dipilih"}), 400
+
+    # 🔹 ambil data nomor dari Supabase (pakai psycopg2 atau raw connection tetap)
+    conn_supabase = get_connection()  
+    cursor_supa = conn_supabase.cursor()
+    cursor_supa.execute(
+        "SELECT customer_id, nomor FROM customer WHERE customer_id IN %s",
+        (tuple(customer_ids),)
+    )
+    customers = cursor_supa.fetchall()
+    cursor_supa.close()
+    conn_supabase.close()
+
+    # 🔹 simpan ke MySQL (pakai SQLAlchemy ORM)
+    ids = []
+    try:
+        for cust in customers:
+            customer_id, nomor = cust
+            new_broadcast = Broadcast(
+                nomor=nomor,
+                message=message,
+                status="pending"
+            )
+            db.session.add(new_broadcast)
+            db.session.flush()   # supaya bisa ambil id sebelum commit
+            ids.append(new_broadcast.id)
+
+        db.session.commit()
+
+        return jsonify({
+            "success": True,
+            "broadcast_ids": ids,
+            "message": "Broadcast berhasil disimpan ke MySQL (status pending)"
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+
+@auth_admin_bp.route("/broadcast", methods=["GET"])
+def get_broadcasts():
+    # Ambil query param status (default pending)
+    status = request.args.get("status", "pending")
+
+    try:
+        broadcasts = Broadcast.query.filter_by(status=status).all()
+
+        result = []
+        for b in broadcasts:
+            result.append({
+                "id": b.id,
+                "nomor": b.nomor,
+                "message": b.message,
+                "status": b.status,
+                "created_at": b.created_at.isoformat() if b.created_at else None,
+                "sent_at": b.sent_at.isoformat() if b.sent_at else None
+            })
+
+        return jsonify({
+            "success": True,
+            "count": len(result),
+            "broadcasts": result
+        })
+
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
