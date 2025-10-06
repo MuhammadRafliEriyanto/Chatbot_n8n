@@ -3,6 +3,9 @@ import requests
 from app import db, mail
 from app.models.user import User
 from app.models.chatHistory import ChatHistory
+from app.models.order import Order
+from app.models.pricing import Pricing
+from app.models.chatbot_log import ChatbotLog
 from flask_jwt_extended import create_access_token
 from flask_mail import Message
 from flask_jwt_extended import jwt_required, get_jwt_identity
@@ -15,7 +18,10 @@ from app.utils.security import (
     generate_reset_token,
     confirm_reset_token
 )
+import json
+import time
 import uuid
+import os
 from flask_jwt_extended import create_access_token
 
 auth_user_bp = Blueprint('auth_user', __name__)
@@ -225,3 +231,102 @@ def chat_with_bot():
         "message": message,
         "response": bot_response
     }), 200
+
+# ================= Pricing =================
+@auth_user_bp.route('/pricing', methods=['GET'])
+def get_pricing():
+    plans = Pricing.query.all()
+    return jsonify([
+        {
+            "id": p.id,
+            "name": p.name,
+            "price": p.price,
+            "features": json.loads(p.features) if p.features else []
+        } for p in plans
+    ]), 200
+
+# ================= Checkout =================
+@auth_user_bp.route('/checkout', methods=['POST'])
+@jwt_required()
+def checkout():
+    data = request.get_json()
+    plan_id = data.get("plan_id")
+
+    plan = Pricing.query.get(plan_id)
+    if not plan:
+        return jsonify({"msg": "Invalid plan"}), 400
+
+    user_id = int(get_jwt_identity())
+    order_id = f"ORDER-{user_id}-{int(time.time())}"
+
+    new_order = Order(
+        order_id=order_id,
+        user_id=user_id,
+        plan_name=plan.name,
+        amount=plan.price,
+        status="pending"
+    )
+    db.session.add(new_order)
+    db.session.commit()
+
+    return jsonify({
+        "order_id": new_order.order_id,
+        "user_id": new_order.user_id,
+        "plan_name": new_order.plan_name,
+        "amount": new_order.amount,
+        "status": new_order.status,
+        "payment_url": f"https://payment.example.com/pay/{new_order.order_id}"
+    }), 200
+
+# ================= Orders History =================
+@auth_user_bp.route('/orders', methods=['GET'])
+@jwt_required()
+def get_orders():
+    user_id = int(get_jwt_identity())
+    orders = Order.query.filter_by(user_id=user_id).all()
+    return jsonify([
+        {
+            "order_id": o.order_id,
+            "plan_name": o.plan_name,
+            "amount": o.amount,
+            "status": o.status,
+            "created_at": o.created_at.isoformat()
+        } for o in orders
+    ]), 200
+
+# ================= Chatbot =================
+@auth_user_bp.route('/chatbot/upload', methods=['POST'])
+@jwt_required()
+def chatbot_upload():
+    data_name = request.form.get("name")
+    file = request.files.get("file")
+
+    if not data_name or not file:
+        return jsonify({"msg": "Name and file are required"}), 400
+
+    # Buat folder uploads kalau belum ada
+    upload_folder = os.path.join(current_app.root_path, "uploads")
+    os.makedirs(upload_folder, exist_ok=True)
+
+    # Simpan file
+    filename = f"{uuid.uuid4()}_{file.filename}"
+    filepath = os.path.join(upload_folder, filename)
+    file.save(filepath)
+
+    # URL file (pastikan /uploads di-serve static)
+    file_url = f"/uploads/{filename}"
+
+    # Simpan ke DB
+    log = ChatbotLog(
+        name=data_name,
+        file_url=file_url
+    )
+    db.session.add(log)
+    db.session.commit()
+
+    return jsonify({
+        "id": log.id,
+        "name": log.name,
+        "file_url": log.file_url,
+        "created_at": log.created_at.isoformat()
+    }), 201

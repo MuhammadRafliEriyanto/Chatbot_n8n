@@ -3,6 +3,7 @@ from app import db, mail
 from sqlalchemy import func
 from app.models.admin import Admin
 from app.models.user import User
+from app.models.order import Order  # pastikan sudah ada model Order
 from flask_jwt_extended import create_access_token, jwt_required
 from flask_mail import Message
 from app.utils.decorators import api_key_required, basic_auth_required
@@ -373,3 +374,35 @@ def get_broadcasts():
 
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 500
+    
+    # ===== GET ALL ORDERS (ADMIN ONLY) =====
+@auth_admin_bp.route('/orders', methods=['GET'])
+@jwt_required()
+def get_all_orders():
+    claims = get_jwt()
+
+    # ✅ cek role admin
+    if claims.get("type") != "admin":
+        return jsonify({"msg": "Admins only"}), 403
+
+    if claims.get("role") not in ["admin", "superadmin"]:
+        return jsonify({"msg": "Forbidden"}), 403
+
+    orders = (
+        db.session.query(Order)
+        .join(User, User.id == Order.user_id)
+        .order_by(Order.created_at.desc())
+        .all()
+    )
+
+    return jsonify([
+        {
+            "order_id": o.order_id,
+            "user_id": o.user_id,
+            "user_name": o.user.name if o.user else None,
+            "plan_name": o.plan_name,
+            "amount": o.amount,
+            "status": o.status,
+            "created_at": o.created_at.isoformat()
+        } for o in orders
+    ]), 200
