@@ -11,3 +11,6 @@ class Order(db.Model):
     amount = db.Column(db.Integer, nullable=False)
     status = db.Column(db.String(20), default="pending")  # pending/paid/failed
     created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+
+ # ✅ Tambahkan ini
+    user = db.relationship("User", backref="orders")
