@@ -231,7 +231,59 @@ def chat_with_bot():
         "message": message,
         "response": bot_response
     }), 200
+    
+    
+GUEST_LIMIT = 10  # maksimal 5x chat per session_id
 
+@auth_user_bp.route('/chatbot/guest', methods=['POST'])
+def chat_with_bot_guest():
+    data = request.get_json()
+    message = data.get("message")
+    session_id = data.get("session_id") or str(uuid.uuid4())
+
+    if not message:
+        return jsonify({"msg": "Message is required"}), 400
+
+    bot_response = "No response"
+    try:
+        resp = requests.post(
+            N8N_WEBHOOK_URL,
+            json={"chatInput": message, "session_id": session_id, "user_id": "guest"},
+            headers={"Content-Type": "application/json"},
+            timeout=100
+        )
+        if resp.ok:
+            try:
+                resp_json = resp.json()
+                bot_response = (
+                    resp_json.get("message")
+                    or resp_json.get("reply")
+                    or "No response"
+                )
+            except ValueError:
+                bot_response = resp.text
+        else:
+            bot_response = f"Webhook returned {resp.status_code}: {resp.text}"
+
+    except Exception as e:
+        bot_response = f"Error connecting to webhook: {e}"
+
+    # simpan ke DB → user_id default untuk guest
+    chat = ChatHistory(
+        user_id=300,   # 👈 guest pakai 0
+        session_id=session_id,
+        message=message,
+        response=bot_response
+    )
+    db.session.add(chat)
+    db.session.commit()
+
+    return jsonify({
+        "session_id": session_id,
+        "user_id": "guest",
+        "message": message,
+        "response": bot_response
+    }), 200 
 # ================= Pricing =================
 @auth_user_bp.route('/pricing', methods=['GET'])
 def get_pricing():
