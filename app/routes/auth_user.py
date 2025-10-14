@@ -168,7 +168,7 @@ def reset_password():
 
     return jsonify({"msg": "Password updated successfully"}), 200
 
-N8N_WEBHOOK_URL = "https://n8n.gitstraining.com/webhook/chatbotcb"
+N8N_WEBHOOK_URL = "https://n8n.gitstraining.com/webhook/chatbotgenius"
 
 @auth_user_bp.route('/chatbot', methods=['POST'])
 @jwt_required()
