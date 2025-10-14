@@ -1,5 +1,7 @@
 from flask import Blueprint, request, jsonify, url_for, current_app
 import requests
+import hmac
+import hashlib
 from app import db, mail
 from app.models.user import User
 from app.models.chatHistory import ChatHistory
@@ -284,6 +286,7 @@ def chat_with_bot_guest():
         "message": message,
         "response": bot_response
     }), 200 
+    
 # ================= Pricing =================
 @auth_user_bp.route('/pricing', methods=['GET'])
 def get_pricing():
@@ -311,6 +314,7 @@ def checkout():
     user_id = int(get_jwt_identity())
     order_id = f"ORDER-{user_id}-{int(time.time())}"
 
+    # Buat order pending
     new_order = Order(
         order_id=order_id,
         user_id=user_id,
@@ -321,14 +325,79 @@ def checkout():
     db.session.add(new_order)
     db.session.commit()
 
-    return jsonify({
-        "order_id": new_order.order_id,
-        "user_id": new_order.user_id,
-        "plan_name": new_order.plan_name,
-        "amount": new_order.amount,
-        "status": new_order.status,
-        "payment_url": f"https://payment.example.com/pay/{new_order.order_id}"
-    }), 200
+    # Ambil konfigurasi Duitku dari environment
+    merchant_code = current_app.config['DUITKU_MERCHANT_CODE']
+    api_key = current_app.config['DUITKU_API_KEY']
+    payment_url = current_app.config['DUITKU_PAYMENT_URL']
+
+    # Buat signature
+    signature_str = merchant_code + order_id + str(plan.price) + api_key
+    signature = hashlib.md5(signature_str.encode('utf-8')).hexdigest()
+
+    # Data yang dikirim ke Duitku
+    payload = {
+        "merchantCode": merchant_code,
+        "paymentAmount": plan.price,
+        "merchantOrderId": order_id,
+        "productDetails": plan.name,
+        "email": "user@example.com",  # kamu bisa ambil dari user table kalau mau
+        "callbackUrl": f"{current_app.config['BASE_URL']}/api/duitku/callback",
+        "returnUrl": f"{current_app.config['BASE_URL']}/payment-success",
+        "signature": signature,
+        "expiryPeriod": 60,  # menit
+    }
+
+    try:
+        resp = requests.post(payment_url, json=payload, timeout=30)
+        resp_json = resp.json()
+    except Exception as e:
+        return jsonify({"msg": f"Error connecting to Duitku: {str(e)}"}), 500
+
+    if resp.status_code == 200 and resp_json.get("statusCode") == "00":
+        payment_page_url = resp_json.get("paymentUrl")
+        return jsonify({
+            "order_id": new_order.order_id,
+            "user_id": new_order.user_id,
+            "plan_name": new_order.plan_name,
+            "amount": new_order.amount,
+            "status": new_order.status,
+            "payment_url": payment_page_url
+        }), 200
+    else:
+        return jsonify({
+            "msg": "Failed to create payment",
+            "response": resp_json
+        }), 400
+
+
+# ================= Duitku Callback =================
+@auth_user_bp.route('/duitku/callback', methods=['POST'])
+def duitku_callback():
+    data = request.get_json()
+    if not data:
+        return jsonify({"msg": "Invalid callback data"}), 400
+
+    order_id = data.get("merchantOrderId")
+    status_code = data.get("resultCode")
+
+    if not order_id:
+        return jsonify({"msg": "Missing order_id"}), 400
+
+    order = Order.query.filter_by(order_id=order_id).first()
+    if not order:
+        return jsonify({"msg": "Order not found"}), 404
+
+    if status_code == "00":
+        order.status = "paid"
+    elif status_code == "01":
+        order.status = "failed"
+    else:
+        order.status = "expired"
+
+    db.session.commit()
+
+    return jsonify({"msg": "Callback processed successfully"}), 200
+
 
 # ================= Orders History =================
 @auth_user_bp.route('/orders', methods=['GET'])

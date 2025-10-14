@@ -30,3 +30,10 @@ class Config:
 
     # 🔹 Tambahan untuk link verifikasi
     BASE_URL = os.getenv("BASE_URL", "http://127.0.0.1:5000")
+    
+    # Duitku
+    DUITKU_MERCHANT_CODE = os.getenv("DUITKU_MERCHANT_CODE")
+    DUITKU_API_KEY = os.getenv("DUITKU_API_KEY")
+    DUITKU_PAYMENT_URL = os.getenv("DUITKU_PAYMENT_URL")
+    DUITKU_STATUS_URL = os.getenv("DUITKU_STATUS_URL")
+
