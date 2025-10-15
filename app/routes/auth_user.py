@@ -336,16 +336,20 @@ def checkout():
 
     # Data yang dikirim ke Duitku
     payload = {
-        "merchantCode": merchant_code,
-        "paymentAmount": plan.price,
-        "merchantOrderId": order_id,
-        "productDetails": plan.name,
-        "email": "user@example.com",  # kamu bisa ambil dari user table kalau mau
-        "callbackUrl": f"{current_app.config['BASE_URL']}/api/duitku/callback",
-        "returnUrl": f"{current_app.config['BASE_URL']}/payment-success",
-        "signature": signature,
-        "expiryPeriod": 60,  # menit
-    }
+    "merchantCode": merchant_code,
+    "paymentAmount": plan.price,
+    "paymentMethod": "VC",  # <=== tambahkan ini!
+    "merchantOrderId": order_id,
+    "productDetails": plan.name,
+    "email": "user@example.com",  # bisa ambil dari user db juga
+    "phoneNumber": "08123456789",
+    "customerVaName": "Dapin",
+    "callbackUrl": f"{current_app.config['BASE_URL']}/api/duitku/callback",
+    "returnUrl": f"{current_app.config['BASE_URL']}/payment-success",
+    "signature": signature,
+    "expiryPeriod": 60,
+}
+
 
     try:
         resp = requests.post(payment_url, json=payload, timeout=30)
