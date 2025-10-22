@@ -295,10 +295,12 @@ def get_pricing():
         {
             "id": p.id,
             "name": p.name,
-            "price": p.price,
+            "price": f"Rp {p.price:,.0f}".replace(",", "."),
+            "raw_price": p.price,  # tambahkan juga harga mentah (opsional)
             "features": json.loads(p.features) if p.features else []
         } for p in plans
     ]), 200
+
 
 # ================= Checkout =================
 @auth_user_bp.route('/checkout', methods=['POST'])
@@ -401,6 +403,67 @@ def duitku_callback():
     db.session.commit()
 
     return jsonify({"msg": "Callback processed successfully"}), 200
+
+#---------bisa beli walaupun user baru----------------#
+@auth_user_bp.route('/checkout/guest', methods=['POST'])
+def guest_checkout():
+    data = request.get_json()
+
+    name = data.get('name')
+    email = data.get('email')
+    plan_name = data.get('plan_name')
+    amount = data.get('amount')
+
+    if not all([name, email, plan_name, amount]):
+        return jsonify({"msg": "Missing required fields"}), 400
+
+    # Generate order_id unik
+    order_id = f"ORDER-GUEST-{int(datetime.now().timestamp())}"
+
+    # Kirim request ke Duitku
+    payload = {
+        "merchantCode": os.getenv("DUITKU_MERCHANT_CODE"),
+        "paymentAmount": amount,
+        "merchantOrderId": order_id,
+        "productDetails": plan_name,
+        "email": email,
+        "callbackUrl": "https://yourdomain.com/api/duitku/callback",
+        "returnUrl": "https://yourdomain.com/payment/success",
+        "signature": hashlib.sha256(
+            f"{os.getenv('DUITKU_MERCHANT_CODE')}{order_id}{amount}{os.getenv('DUITKU_API_KEY')}".encode()
+        ).hexdigest()
+    }
+
+    response = requests.post(
+        os.getenv("DUITKU_PAYMENT_URL"),
+        json=payload,
+        headers={"Content-Type": "application/json"}
+    )
+
+    res_data = response.json()
+
+    if response.status_code == 200 and "paymentUrl" in res_data:
+        # Simpan order ke database
+        order = Order(
+            order_id=order_id,
+            plan_name=plan_name,
+            email=email,
+            amount=amount,
+            status="pending"
+        )
+        db.session.add(order)
+        db.session.commit()
+
+        return jsonify({
+            "payment_url": res_data["paymentUrl"],
+            "order_id": order_id,
+            "status": "pending"
+        })
+    else:
+        return jsonify({
+            "msg": "Failed to create guest payment",
+            "response": res_data
+        }), 400
 
 
 # ================= Orders History =================
