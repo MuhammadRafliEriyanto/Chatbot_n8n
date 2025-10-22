@@ -311,143 +311,147 @@ def format_rupiah(amount: int) -> str:
 @auth_user_bp.route('/checkout', methods=['POST'])
 @jwt_required()
 def checkout():
-    data = request.get_json()
-    plan_id = data.get("plan_id")
-    plan = Pricing.query.get(plan_id)
-    if not plan:
-        return jsonify({"msg": "Invalid plan"}), 400
-
-    user_id = int(get_jwt_identity())
-    order_id = f"ORDER-{user_id}-{int(time.time())}"
-
-    # Parsing harga untuk Duitku (hapus Rp, koma, spasi)
     try:
-        cleaned_price = re.sub(r'[^0-9]', '', str(plan.price))
+        data = request.get_json()
+        plan_id = data.get("plan_id")
+        plan = Pricing.query.get(plan_id)
+        if not plan:
+            return jsonify({"msg": "Invalid plan"}), 400
+
+        user_id = int(get_jwt_identity())
+        order_id = f"ORDER-{user_id}-{int(time.time())}"
+
+        # Parsing harga untuk Duitku
+        cleaned_price = re.sub(r'[^0-9]', '', str(plan.price)).strip()
         payment_amount = int(cleaned_price)
 
         if payment_amount < 10000:
             return jsonify({"msg": "Plan price must be at least 10,000 IDR"}), 400
-    except Exception as e:
-        return jsonify({"msg": f"Invalid plan price format: {plan.price} ({str(e)})"}), 400
 
-    # Simpan order di DB tetap format Rp
-    new_order = Order(
-        order_id=order_id,
-        user_id=user_id,
-        plan_name=plan.name,
-        amount=plan.price,  # VARCHAR, tetap "Rp250.000"
-        status="pending"
-    )
-    db.session.add(new_order)
-    db.session.commit()
+        # Simpan order di DB tetap format Rp
+        new_order = Order(
+            order_id=order_id,
+            user_id=user_id,
+            plan_name=plan.name,
+            amount=plan.price,  # VARCHAR
+            status="pending"
+        )
+        db.session.add(new_order)
+        db.session.commit()
 
-    # Payload Duitku
-    merchant_code = current_app.config['DUITKU_MERCHANT_CODE']
-    api_key = current_app.config['DUITKU_API_KEY']
-    payment_url = current_app.config['DUITKU_PAYMENT_URL']
+        # Payload Duitku
+        merchant_code = current_app.config['DUITKU_MERCHANT_CODE']
+        api_key = current_app.config['DUITKU_API_KEY']
+        payment_url = current_app.config['DUITKU_PAYMENT_URL']
 
-    signature_str = merchant_code + order_id + str(payment_amount) + api_key
-    signature = hashlib.md5(signature_str.encode('utf-8')).hexdigest()
+        signature_str = merchant_code + order_id + str(payment_amount) + api_key
+        signature = hashlib.md5(signature_str.encode('utf-8')).hexdigest()
 
-    payload = {
-        "merchantCode": merchant_code,
-        "paymentAmount": payment_amount,  # kirim integer
-        "paymentMethod": "VC",
-        "merchantOrderId": order_id,
-        "productDetails": plan.name,
-        "email": "user@example.com",
-        "phoneNumber": "08123456789",
-        "customerVaName": "Dapin",
-        "callbackUrl": f"{current_app.config['BASE_URL']}/api/auth/duitku/callback",
-        "returnUrl": f"{current_app.config['BASE_URL']}/payment-success",
-        "signature": signature,
-        "expiryPeriod": 60
-    }
+        payload = {
+            "merchantCode": merchant_code,
+            "paymentAmount": payment_amount,
+            "paymentMethod": "VC",
+            "merchantOrderId": order_id,
+            "productDetails": plan.name,
+            "email": "user@example.com",
+            "phoneNumber": "08123456789",
+            "customerVaName": "Dapin",
+            "callbackUrl": f"{current_app.config['BASE_URL']}/api/auth/duitku/callback",
+            "returnUrl": f"{current_app.config['BASE_URL']}/payment-success",
+            "signature": signature,
+            "expiryPeriod": 60
+        }
 
-    try:
+        # Debug: tampilkan payload
+        current_app.logger.info(f"[DEBUG] payload: {payload}")
+
         resp = requests.post(payment_url, json=payload, timeout=30)
         resp_json = resp.json()
-    except Exception as e:
-        return jsonify({"msg": f"Error connecting to Duitku: {str(e)}"}), 500
 
-    if resp.status_code == 200 and resp_json.get("statusCode") == "00":
-        return jsonify({
-            "order_id": new_order.order_id,
-            "user_id": new_order.user_id,
-            "plan_name": new_order.plan_name,
-            "amount": new_order.amount,  # tetap string Rp
-            "status": new_order.status,
-            "payment_url": resp_json.get("paymentUrl")
-        }), 200
-    else:
-        return jsonify({"msg": "Failed to create payment", "response": resp_json}), 400
+        if resp.status_code == 200 and resp_json.get("statusCode") == "00":
+            return jsonify({
+                "order_id": new_order.order_id,
+                "user_id": new_order.user_id,
+                "plan_name": new_order.plan_name,
+                "amount": new_order.amount,
+                "status": new_order.status,
+                "payment_url": resp_json.get("paymentUrl")
+            }), 200
+        else:
+            return jsonify({"msg": "Failed to create payment", "response": resp_json}), 400
+
+    except Exception as e:
+        current_app.logger.error(f"[ERROR] checkout: {str(e)}")
+        return jsonify({"msg": f"Internal Server Error: {str(e)}"}), 500
 
 # ================= Checkout guest =================
 @auth_user_bp.route('/checkout/guest', methods=['POST'])
 def guest_checkout():
-    data = request.get_json()
-    name = data.get('name')
-    email = data.get('email')
-    plan_name = data.get('plan_name')
-    amount_str = data.get('amount')  # misal "Rp250.000"
-
-    if not all([name, email, plan_name, amount_str]):
-        return jsonify({"msg": "Missing required fields"}), 400
-
-    # Parsing untuk Duitku
     try:
-        cleaned_amount = re.sub(r'[^0-9]', '', str(amount_str))
+        data = request.get_json()
+        name = data.get('name')
+        email = data.get('email')
+        plan_name = data.get('plan_name')
+        amount_str = data.get('amount')  # misal "Rp250.000"
+
+        if not all([name, email, plan_name, amount_str]):
+            return jsonify({"msg": "Missing required fields"}), 400
+
+        # Parsing harga untuk Duitku
+        cleaned_amount = re.sub(r'[^0-9]', '', str(amount_str)).strip()
         payment_amount = int(cleaned_amount)
 
         if payment_amount < 10000:
             return jsonify({"msg": "Plan price must be at least 10,000 IDR"}), 400
-    except Exception as e:
-        return jsonify({"msg": f"Invalid amount format: {amount_str} ({str(e)})"}), 400
 
-    order_id = f"ORDER-GUEST-{int(datetime.now().timestamp())}"
+        order_id = f"ORDER-GUEST-{int(datetime.now().timestamp())}"
 
-    # Signature MD5
-    signature = hashlib.md5(
-        f"{os.getenv('DUITKU_MERCHANT_CODE')}{order_id}{payment_amount}{os.getenv('DUITKU_API_KEY')}".encode()
-    ).hexdigest()
+        signature = hashlib.md5(
+            f"{os.getenv('DUITKU_MERCHANT_CODE')}{order_id}{payment_amount}{os.getenv('DUITKU_API_KEY')}".encode()
+        ).hexdigest()
 
-    payload = {
-        "merchantCode": os.getenv("DUITKU_MERCHANT_CODE"),
-        "paymentAmount": payment_amount,  # integer
-        "merchantOrderId": order_id,
-        "productDetails": plan_name,
-        "email": email,
-        "callbackUrl": "https://yourdomain.com/api/auth/duitku/callback",
-        "returnUrl": "https://yourdomain.com/payment/success",
-        "signature": signature
-    }
+        payload = {
+            "merchantCode": os.getenv("DUITKU_MERCHANT_CODE"),
+            "paymentAmount": payment_amount,
+            "merchantOrderId": order_id,
+            "productDetails": plan_name,
+            "email": email,
+            "callbackUrl": "https://yourdomain.com/api/auth/duitku/callback",
+            "returnUrl": "https://yourdomain.com/payment/success",
+            "signature": signature
+        }
 
-    try:
+        # Debug: tampilkan payload
+        current_app.logger.info(f"[DEBUG] guest payload: {payload}")
+
         resp = requests.post(os.getenv("DUITKU_PAYMENT_URL"), json=payload,
                              headers={"Content-Type": "application/json"}, timeout=30)
         res_data = resp.json()
+
+        if resp.status_code == 200 and "paymentUrl" in res_data:
+            order = Order(
+                order_id=order_id,
+                plan_name=plan_name,
+                email=email,
+                amount=amount_str,
+                status="pending"
+            )
+            db.session.add(order)
+            db.session.commit()
+
+            return jsonify({
+                "payment_url": res_data["paymentUrl"],
+                "order_id": order_id,
+                "status": "pending",
+                "amount": order.amount
+            })
+        else:
+            return jsonify({"msg": "Failed to create guest payment", "response": res_data}), 400
+
     except Exception as e:
-        return jsonify({"msg": f"Error connecting to Duitku: {str(e)}"}), 500
+        current_app.logger.error(f"[ERROR] guest_checkout: {str(e)}")
+        return jsonify({"msg": f"Internal Server Error: {str(e)}"}), 500
 
-    if resp.status_code == 200 and "paymentUrl" in res_data:
-        order = Order(
-            order_id=order_id,
-            plan_name=plan_name,
-            email=email,
-            amount=amount_str,  # tetap Rp di DB
-            status="pending"
-        )
-        db.session.add(order)
-        db.session.commit()
-
-        return jsonify({
-            "payment_url": res_data["paymentUrl"],
-            "order_id": order_id,
-            "status": "pending",
-            "amount": order.amount  # selalu string Rp
-        })
-    else:
-        return jsonify({"msg": "Failed to create guest payment", "response": res_data}), 400
     
 # ================= Orders History =================
 @auth_user_bp.route('/orders', methods=['GET'])
