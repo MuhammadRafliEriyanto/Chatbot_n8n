@@ -313,7 +313,6 @@ def format_rupiah(amount: int) -> str:
 def checkout():
     data = request.get_json()
     plan_id = data.get("plan_id")
-
     plan = Pricing.query.get(plan_id)
     if not plan:
         return jsonify({"msg": "Invalid plan"}), 400
@@ -352,7 +351,7 @@ def checkout():
 
     payload = {
         "merchantCode": merchant_code,
-        "paymentAmount": payment_amount,
+        "paymentAmount": payment_amount,  # kirim integer
         "paymentMethod": "VC",
         "merchantOrderId": order_id,
         "productDetails": plan.name,
@@ -395,6 +394,7 @@ def guest_checkout():
     if not all([name, email, plan_name, amount_str]):
         return jsonify({"msg": "Missing required fields"}), 400
 
+    # Parsing untuk Duitku
     try:
         cleaned_amount = re.sub(r'[^0-9]', '', str(amount_str))
         payment_amount = int(cleaned_amount)
@@ -406,13 +406,14 @@ def guest_checkout():
 
     order_id = f"ORDER-GUEST-{int(datetime.now().timestamp())}"
 
+    # Signature MD5
     signature = hashlib.md5(
         f"{os.getenv('DUITKU_MERCHANT_CODE')}{order_id}{payment_amount}{os.getenv('DUITKU_API_KEY')}".encode()
     ).hexdigest()
 
     payload = {
         "merchantCode": os.getenv("DUITKU_MERCHANT_CODE"),
-        "paymentAmount": payment_amount,
+        "paymentAmount": payment_amount,  # integer
         "merchantOrderId": order_id,
         "productDetails": plan_name,
         "email": email,
@@ -443,11 +444,11 @@ def guest_checkout():
             "payment_url": res_data["paymentUrl"],
             "order_id": order_id,
             "status": "pending",
-            "amount": order.amount  # selalu "Rp250.000"
+            "amount": order.amount  # selalu string Rp
         })
     else:
         return jsonify({"msg": "Failed to create guest payment", "response": res_data}), 400
-
+    
 # ================= Orders History =================
 @auth_user_bp.route('/orders', methods=['GET'])
 @jwt_required()
