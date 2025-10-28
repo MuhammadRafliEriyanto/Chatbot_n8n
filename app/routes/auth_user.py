@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify, url_for, current_app
 import requests
+import secrets
 import hmac
 import hashlib
 from app import db, mail
@@ -26,6 +27,7 @@ import uuid
 from app import db, oauth  # ✅ ambil oauth dari app/__init__.py
 import os
 from flask_jwt_extended import create_access_token
+from flask import session
 
 auth_user_bp = Blueprint('auth_user', __name__)
 
@@ -171,46 +173,44 @@ def reset_password():
 
     return jsonify({"msg": "Password updated successfully"}), 200
 
-# ====== REGISTER GOOGLE OAUTH PROVIDER ======
+# ===== Register Google OAuth =====
 google = oauth.register(
     name='google',
     client_id=os.getenv("GOOGLE_CLIENT_ID"),
     client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
-    server_metadata_url=os.getenv("GOOGLE_DISCOVERY_URL", "https://accounts.google.com/.well-known/openid-configuration"),
+    server_metadata_url=os.getenv("GOOGLE_DISCOVERY_URL"),
     client_kwargs={'scope': 'openid email profile'}
 )
 
-# ====== LOGIN GOOGLE ======
-@auth_user_bp.route('/login/google', methods=['GET'])
+@auth_user_bp.route('/login/google')
 def login_google():
-    """
-    Endpoint untuk memulai proses login Google
-    """
-    try:
-        redirect_uri = url_for('auth_user.authorize_google', _external=True)
-        print(f"Redirect URI → {redirect_uri}")
-        return google.authorize_redirect(redirect_uri)
-    except Exception as e:
-        print("Google Login Redirect Error:", e)
-        return jsonify({"msg": "Failed to initiate Google login", "error": str(e)}), 400
+    redirect_uri = url_for('auth_user.authorize_google', _external=True)
 
+    # buat nonce unik
+    nonce = secrets.token_urlsafe(16)
+    session['google_oauth_nonce'] = nonce
 
-# ====== CALLBACK GOOGLE ======
+    return google.authorize_redirect(redirect_uri, prompt="select_account", nonce=nonce)
+
+# ===== CALLBACK GOOGLE =====
 @auth_user_bp.route('/login/google/callback')
 def authorize_google():
-    """
-    Endpoint callback setelah user login dengan Google
-    """
     try:
+        # Ambil token dari Google (Authlib handle state CSRF)
         token = google.authorize_access_token()
-        user_info = token.get('userinfo')
 
+        # Ambil nonce dari session
+        nonce = session.get('google_oauth_nonce')
+        if not nonce:
+            return jsonify({"msg": "Session expired or missing nonce"}), 400
+
+        # Ambil user info dari ID token dengan nonce
+        user_info = google.parse_id_token(token, nonce=nonce)
+
+        # fallback ambil manual jika user_info kosong
         if not user_info:
-            # Jika tidak otomatis tersedia, ambil manual
-            resp = google.get('userinfo')
+            resp = google.get('https://www.googleapis.com/oauth2/v1/userinfo')
             user_info = resp.json()
-
-        print("Google User Info:", user_info)
 
         email = user_info.get('email')
         name = user_info.get('name', 'No Name')
@@ -218,10 +218,8 @@ def authorize_google():
         if not email:
             return jsonify({"msg": "Failed to get email from Google"}), 400
 
-        # Cek user di database
+        # Cek user di DB
         user = User.query.filter_by(email=email).first()
-
-        # Kalau belum ada → buat akun baru
         if not user:
             user = User(
                 name=name,
@@ -251,7 +249,6 @@ def authorize_google():
     except Exception as e:
         print("Google Login Error:", e)
         return jsonify({"msg": "Google login failed", "error": str(e)}), 400
-
 
 # ====== TES API SAJA ======
 @auth_user_bp.route('/ping', methods=['GET'])
