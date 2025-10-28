@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 basedir = os.path.abspath(os.path.dirname(__file__))
 load_dotenv(os.path.join(basedir, ".env"))
 
+
 class Config:
     # Secrets
     SECRET_KEY = os.getenv("SECRET_KEY", "super-secret")
@@ -14,6 +15,14 @@ class Config:
     # Basic Auth
     BASIC_AUTH_USERNAME = os.getenv("BASIC_AUTH_USERNAME", "admin")
     BASIC_AUTH_PASSWORD = os.getenv("BASIC_AUTH_PASSWORD", "password")
+
+    # Google OAuth
+    GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
+    GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
+    GOOGLE_DISCOVERY_URL = os.getenv(
+        "GOOGLE_DISCOVERY_URL",
+        "https://accounts.google.com/.well-known/openid-configuration"
+    )
 
     # Database
     SQLALCHEMY_DATABASE_URI = os.getenv("DATABASE_URL", "sqlite:///chatbot.db")
@@ -28,12 +37,11 @@ class Config:
     MAIL_PASSWORD = os.getenv("MAIL_PASSWORD")
     MAIL_DEFAULT_SENDER = os.getenv("MAIL_DEFAULT_SENDER")
 
-    # 🔹 Tambahan untuk link verifikasi
+    # Base URL
     BASE_URL = os.getenv("BASE_URL", "http://127.0.0.1:5000")
-    
+
     # Duitku
     DUITKU_MERCHANT_CODE = os.getenv("DUITKU_MERCHANT_CODE")
     DUITKU_API_KEY = os.getenv("DUITKU_API_KEY")
     DUITKU_PAYMENT_URL = os.getenv("DUITKU_PAYMENT_URL")
     DUITKU_STATUS_URL = os.getenv("DUITKU_STATUS_URL")
-

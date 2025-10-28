@@ -6,36 +6,40 @@ from dotenv import load_dotenv
 import os
 from flask_cors import CORS
 from flask_mail import Mail
+from authlib.integrations.flask_client import OAuth
 
-# Load .env first
+# Load environment variables
 load_dotenv()
 
 db = SQLAlchemy()
 migrate = Migrate()
 jwt = JWTManager()
-mail = Mail()  # 🔹 Tambahan
+mail = Mail()
+oauth = OAuth()  # ✅ buat object dulu tanpa app
 
 def create_app():
     app = Flask(__name__)
     app.config.from_object("config.Config")
 
+    # ✅ Inisialisasi ekstensi
     db.init_app(app)
     migrate.init_app(app, db)
     jwt.init_app(app)
-    mail.init_app(app)  # 🔹 Tambahan
+    mail.init_app(app)
+    oauth.init_app(app)  # ✅ inisialisasi OAuth di sini
     CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=True)
 
-    # 🔥 Import semua model agar Flask-Migrate tahu tabel mana yang harus dibuat
+    # Import models agar Flask-Migrate tahu tabelnya
     from app.models import user, admin
 
-    # ✅ Register routes
+    # Register blueprints
     from app.routes.auth_admin import auth_admin_bp
     from app.routes.auth_user import auth_user_bp
 
     app.register_blueprint(auth_admin_bp, url_prefix='/api/admin')
     app.register_blueprint(auth_user_bp, url_prefix='/api/user')
-    
-      # 🔹 Tambahkan route root untuk health check
+
+    # Route root
     @app.route('/')
     def home():
         return "Chatbot Flask app is running!"

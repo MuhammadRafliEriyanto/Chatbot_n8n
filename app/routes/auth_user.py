@@ -23,6 +23,7 @@ from app.utils.security import (
 import json
 import time
 import uuid
+from app import db, oauth  # ✅ ambil oauth dari app/__init__.py
 import os
 from flask_jwt_extended import create_access_token
 
@@ -169,6 +170,93 @@ def reset_password():
     db.session.commit()
 
     return jsonify({"msg": "Password updated successfully"}), 200
+
+# ====== REGISTER GOOGLE OAUTH PROVIDER ======
+google = oauth.register(
+    name='google',
+    client_id=os.getenv("GOOGLE_CLIENT_ID"),
+    client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
+    server_metadata_url=os.getenv("GOOGLE_DISCOVERY_URL", "https://accounts.google.com/.well-known/openid-configuration"),
+    client_kwargs={'scope': 'openid email profile'}
+)
+
+# ====== LOGIN GOOGLE ======
+@auth_user_bp.route('/login/google', methods=['GET'])
+def login_google():
+    """
+    Endpoint untuk memulai proses login Google
+    """
+    try:
+        redirect_uri = url_for('auth_user.authorize_google', _external=True)
+        print(f"Redirect URI → {redirect_uri}")
+        return google.authorize_redirect(redirect_uri)
+    except Exception as e:
+        print("Google Login Redirect Error:", e)
+        return jsonify({"msg": "Failed to initiate Google login", "error": str(e)}), 400
+
+
+# ====== CALLBACK GOOGLE ======
+@auth_user_bp.route('/login/google/callback')
+def authorize_google():
+    """
+    Endpoint callback setelah user login dengan Google
+    """
+    try:
+        token = google.authorize_access_token()
+        user_info = token.get('userinfo')
+
+        if not user_info:
+            # Jika tidak otomatis tersedia, ambil manual
+            resp = google.get('userinfo')
+            user_info = resp.json()
+
+        print("Google User Info:", user_info)
+
+        email = user_info.get('email')
+        name = user_info.get('name', 'No Name')
+
+        if not email:
+            return jsonify({"msg": "Failed to get email from Google"}), 400
+
+        # Cek user di database
+        user = User.query.filter_by(email=email).first()
+
+        # Kalau belum ada → buat akun baru
+        if not user:
+            user = User(
+                name=name,
+                email=email,
+                phone_number=str(uuid.uuid4())[:12],
+                password_hash="google-oauth",  # dummy password
+                is_verified=True
+            )
+            db.session.add(user)
+            db.session.commit()
+
+        # Buat JWT token
+        access_token = create_access_token(identity=str(user.id))
+        session_id = str(uuid.uuid4())
+
+        return jsonify({
+            "msg": "Login with Google successful",
+            "access_token": access_token,
+            "session_id": session_id,
+            "user": {
+                "id": user.id,
+                "name": user.name,
+                "email": user.email
+            }
+        }), 200
+
+    except Exception as e:
+        print("Google Login Error:", e)
+        return jsonify({"msg": "Google login failed", "error": str(e)}), 400
+
+
+# ====== TES API SAJA ======
+@auth_user_bp.route('/ping', methods=['GET'])
+def ping():
+    return jsonify({"msg": "Auth User route OK"}), 200
 
 N8N_WEBHOOK_URL = "https://n8n.gitstraining.com/webhook/chatbotgenius"
 
