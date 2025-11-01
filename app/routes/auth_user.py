@@ -9,6 +9,7 @@ from app.models.chatHistory import ChatHistory
 from app.models.order import Order
 from app.models.pricing import Pricing
 from app.models.chatbot_log import ChatbotLog
+from app.models.broadcast import Broadcast
 from flask_jwt_extended import create_access_token
 from flask_mail import Message
 from flask_jwt_extended import jwt_required, get_jwt_identity
@@ -601,3 +602,90 @@ def chatbot_upload():
         "file_url": log.file_url,
         "created_at": log.created_at.isoformat()
     }), 201
+    
+
+# ================= Broadcast =================
+@auth_user_bp.route("/broadcast/add", methods=["POST"])
+@jwt_required()
+def add_broadcastt():
+    data = request.get_json()
+    message = data.get("message")
+    numbers = data.get("numbers", [])
+
+    user_id = int(get_jwt_identity())  # ambil user_id dari token
+
+    ids = []
+    try:
+        for nomor in numbers:
+            new_broadcast = Broadcast(
+                user_id=user_id,   # wajib
+                nomor=nomor,
+                message=message,
+                status="pending"
+            )
+            db.session.add(new_broadcast)
+            db.session.flush()
+            ids.append(new_broadcast.id)
+
+        db.session.commit()
+
+        # kirim ke n8n
+        webhook_url = "https://n8n.gitstraining.com/webhook-test/broadcast"
+        payload = {
+            "message": message,
+            "numbers": numbers
+        }
+        try:
+            requests.post(webhook_url, json=payload, timeout=10)
+        except Exception as e:
+            print("Gagal trigger n8n:", e)
+
+        return jsonify({
+            "success": True,
+            "broadcast_ids": ids,
+            "message": "Broadcast berhasil disimpan dan dikirim ke n8n"
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        print("ERROR DETAIL:", e)
+        return jsonify({"success": False, "message": str(e)}), 500
+
+# ================= BroadcastHistori =================
+@auth_user_bp.route('/broadcast', methods=['GET'])
+@jwt_required()
+def list_broadcast():
+    user_id = int(get_jwt_identity())
+    broadcasts = Broadcast.query.filter_by(user_id=user_id).all()
+    return jsonify([
+        {
+            "id": b.id,
+            "nomor": b.nomor,
+            "message": b.message,
+            "status": b.status,
+            "created_at": b.created_at.isoformat(),
+            "sent_at": b.sent_at.isoformat() if b.sent_at else None
+        } for b in broadcasts
+    ]), 200
+
+# ================= BroadcastUpdate =================
+@auth_user_bp.route('/broadcast/<int:broadcast_id>', methods=['PUT'])
+@jwt_required()
+def update_broadcast(broadcast_id):
+    user_id = int(get_jwt_identity())
+    broadcast = Broadcast.query.filter_by(id=broadcast_id, user_id=user_id).first_or_404()
+    data = request.get_json()
+    broadcast.message = data.get('message', broadcast.message)
+    broadcast.status = data.get('status', broadcast.status)
+    db.session.commit()
+    return jsonify({"msg": "Broadcast updated"}), 200
+
+# ================= BroadcastDelete =================
+@auth_user_bp.route('/broadcast/<int:broadcast_id>', methods=['DELETE'])
+@jwt_required()
+def delete_broadcast(broadcast_id):
+    user_id = int(get_jwt_identity())
+    broadcast = Broadcast.query.filter_by(id=broadcast_id, user_id=user_id).first_or_404()
+    db.session.delete(broadcast)
+    db.session.commit()
+    return jsonify({"msg": "Broadcast deleted"}), 200
