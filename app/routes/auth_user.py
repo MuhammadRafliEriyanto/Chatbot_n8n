@@ -549,8 +549,7 @@ def guest_checkout():
             "response": res_data
         }), 400
 
-
-# ================= Orders History =================
+# ================= Orders History dan CRUD CUSTOMER =================
 @auth_user_bp.route('/orders', methods=['GET'])
 @jwt_required()
 def get_orders():
@@ -565,6 +564,58 @@ def get_orders():
             "created_at": o.created_at.isoformat()
         } for o in orders
     ]), 200
+    
+    
+# ================= Update Order (Manual) =================
+@auth_user_bp.route('/orders/<order_id>', methods=['PUT'])
+@jwt_required()
+def update_order(order_id):
+    user_id = int(get_jwt_identity())
+    order = Order.query.filter_by(order_id=order_id, user_id=user_id).first()
+
+    if not order:
+        return jsonify({"msg": "Order not found"}), 404
+
+    data = request.get_json()
+    new_status = data.get("status")
+
+    if new_status not in ["pending", "paid", "failed", "expired"]:
+        return jsonify({"msg": "Invalid status value"}), 400
+
+    order.status = new_status
+    db.session.commit()
+
+    return jsonify({
+        "msg": "Order updated successfully",
+        "order": {
+            "order_id": order.order_id,
+            "status": order.status,
+            "plan_name": order.plan_name,
+            "amount": order.amount,
+            "updated_at": order.created_at.isoformat()
+        }
+    }), 200
+
+
+# ================= Delete Order =================
+@auth_user_bp.route('/orders/<order_id>', methods=['DELETE'])
+@jwt_required()
+def delete_order(order_id):
+    user_id = int(get_jwt_identity())
+    order = Order.query.filter_by(order_id=order_id, user_id=user_id).first()
+
+    if not order:
+        return jsonify({"msg": "Order not found"}), 404
+
+    # Hanya boleh hapus order yang belum dibayar
+    if order.status != "pending":
+        return jsonify({"msg": "Only pending orders can be deleted"}), 400
+
+    db.session.delete(order)
+    db.session.commit()
+
+    return jsonify({"msg": "Order deleted successfully"}), 200
+
 
 # ================= Chatbot =================
 @auth_user_bp.route('/chatbot/upload', methods=['POST'])
@@ -630,7 +681,7 @@ def add_broadcastt():
         db.session.commit()
 
         # kirim ke n8n
-        webhook_url = "https://n8n.gitstraining.com/webhook-test/broadcast"
+        webhook_url = "https://n8n.gitstraining.com/webhook/broadcast"
         payload = {
             "message": message,
             "numbers": numbers
@@ -672,7 +723,7 @@ def list_broadcast():
 @auth_user_bp.route('/broadcast/<int:broadcast_id>', methods=['PUT'])
 @jwt_required()
 def update_broadcast(broadcast_id):
-    user_id = int(get_jwt_identity())
+    user_id = int(get_jwt_identity()) 
     broadcast = Broadcast.query.filter_by(id=broadcast_id, user_id=user_id).first_or_404()
     data = request.get_json()
     broadcast.message = data.get('message', broadcast.message)
