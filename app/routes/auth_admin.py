@@ -4,6 +4,8 @@ from sqlalchemy import func
 from app.models.admin import Admin
 from app.models.user import User
 from app.models.order import Order  # pastikan sudah ada model Order
+from app.models.customer import Customer  
+from app.models.broadcast import Broadcast
 from flask_jwt_extended import create_access_token, jwt_required
 from flask_mail import Message
 from app.utils.decorators import api_key_required, basic_auth_required
@@ -20,8 +22,9 @@ from flask_jwt_extended import create_access_token, jwt_required, get_jwt, get_j
 
 auth_admin_bp = Blueprint('auth_admin', __name__)
 
-# ===== ADMIN REGISTER =====
-# ===== ADMIN REGISTER =====
+# =============================
+# REHISTER ADMIN 
+# =============================
 @auth_admin_bp.route('/register', methods=['POST'])
 def register_admin():
     data = request.get_json()
@@ -70,7 +73,9 @@ def register_admin():
 
     return jsonify({"msg": "Admin registered successfully. Please check your email to verify your account."}), 201
 
-# ===== ADMIN LOGIN =====
+# =============================
+# ADMIN LOGIN
+# =============================
 @auth_admin_bp.route('/login', methods=['POST'])
 @api_key_required
 @basic_auth_required
@@ -94,7 +99,9 @@ def login_admin():
 
     return jsonify({"msg": "Invalid credentials"}), 401
 
-# ===== VERIFIKASI EMAIL ADMIN =====
+# =============================
+# VERIFTOKEN ADMIN
+# =============================
 @auth_admin_bp.route('/verify/<token>', methods=['GET'])
 def verify_email_admin(token):
     email = confirm_token(token)
@@ -113,22 +120,9 @@ def verify_email_admin(token):
     return jsonify({"msg": "Admin email verified successfully"}), 200
 
 
-# ===== GET ALL USERS (ADMIN ONLY) =====
-@auth_admin_bp.route('/users', methods=['GET'])
-@jwt_required()
-def get_all_users():
-    users = User.query.all()
-    return jsonify([
-        {
-            "id": u.id,
-            "name": u.name,
-            "email": u.email,
-            "is_verified": u.is_verified
-        } for u in users
-    ]), 200
-
-
-# ===== RESEND VERIFICATION =====
+# =============================
+# VERIFEMAIL RESEND ADMIN *jika link kadaluarsa*
+# =============================
 @auth_admin_bp.route('/resend-verification/<int:admin_id>', methods=['POST'])
 @jwt_required()
 def resend_verification(admin_id):
@@ -145,7 +139,25 @@ def resend_verification(admin_id):
 
     return jsonify({"msg": "Verification email resent"}), 200
 
-# ===== GET CHAT HISTORY (ADMIN ONLY) =====
+# =============================
+# AMBIL DATA USERS PENGGUNA
+# =============================
+@auth_admin_bp.route('/users', methods=['GET'])
+@jwt_required()
+def get_all_users():
+    users = User.query.all()
+    return jsonify([
+        {
+            "id": u.id,
+            "name": u.name,
+            "email": u.email,
+            "is_verified": u.is_verified
+        } for u in users
+    ]), 200
+
+# =============================
+# AMBIL DATA HISTORI CHATS
+# =============================
 @auth_admin_bp.route('/chats', methods=['GET'])
 @jwt_required()
 def get_all_chats():
@@ -173,6 +185,9 @@ def get_all_chats():
         } for c in chats
     ]), 200
 
+# =============================
+# AMBIL DATA chats per tanggal Total chat per tanggal (OPSIONAL)
+# =============================
 @auth_admin_bp.route("/chats/per-day", methods=["GET"])
 def chats_per_day():
     results = (
@@ -191,7 +206,9 @@ def chats_per_day():
     ]
     return jsonify(data)
 
-
+# =============================
+# AMBIL DATA chats per jam Total chat per jam (OPSIONAL)
+# =============================
 @auth_admin_bp.route("/chats/per-hour", methods=["GET"])
 def chats_per_hour():
     results = (
@@ -210,7 +227,9 @@ def chats_per_hour():
     ]
     return jsonify(data)
 
-
+# =============================
+# AMBIL DATA chats Perbandingan chat dari tamu & user terdaftar (OPSIONAL)
+# =============================
 @auth_admin_bp.route("/chats/guest-vs-registered", methods=["GET"])
 def guest_vs_registered():
     results = (
@@ -232,8 +251,9 @@ def guest_vs_registered():
     ]
     return jsonify(data)
 
-
-
+# =============================
+# AMBIL DATA customer wa 
+# =============================
 @auth_admin_bp.route("/customer/wa", methods=["GET"])
 def get_customer():
     conn = get_connection()
@@ -247,7 +267,9 @@ def get_customer():
     data = [dict(zip(colnames, row)) for row in rows]
     return jsonify(data)
 
-
+# =============================
+# AMBIL DATA histori wa 
+# =============================
 @auth_admin_bp.route("/history/wa", methods=["GET"])
 def get_history():
     conn = get_connection()
@@ -299,6 +321,10 @@ def get_history():
 
     return jsonify(list(grouped.values()))
 
+
+# =============================
+# Admin mengirim pesan broadcast ke banyak customer
+# =============================
 @auth_admin_bp.route("/broadcast/add", methods=["POST"])
 def add_broadcast():
     data = request.get_json()
@@ -345,8 +371,9 @@ def add_broadcast():
         db.session.rollback()
         return jsonify({"success": False, "message": str(e)}), 500
 
-
-
+# =============================
+# ADMIN AMBIL DATA BROADCAST
+# =============================
 @auth_admin_bp.route("/broadcast", methods=["GET"])
 def get_broadcasts():
     # Ambil query param status (default pending)
@@ -375,34 +402,70 @@ def get_broadcasts():
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 500
     
-    # ===== GET ALL ORDERS (ADMIN ONLY) =====
+
+# =============================
+# ADMIN AMBIL DATA semua order dari semua user.
+# =============================    
 @auth_admin_bp.route('/orders', methods=['GET'])
 @jwt_required()
 def get_all_orders():
     claims = get_jwt()
-
-    # ✅ cek role admin
     if claims.get("type") != "admin":
         return jsonify({"msg": "Admins only"}), 403
 
-    if claims.get("role") not in ["admin", "superadmin"]:
-        return jsonify({"msg": "Forbidden"}), 403
+    status = request.args.get("status")
+    query = db.session.query(Order).join(User, User.id == Order.user_id)
 
-    orders = (
-        db.session.query(Order)
-        .join(User, User.id == Order.user_id)
-        .order_by(Order.created_at.desc())
-        .all()
-    )
+    if status:
+        query = query.filter(Order.status == status)
 
+    orders = query.order_by(Order.created_at.desc()).all()
     return jsonify([
         {
             "order_id": o.order_id,
-            "user_id": o.user_id,
             "user_name": o.user.name if o.user else None,
-            "plan_name": o.plan_name,
             "amount": o.amount,
             "status": o.status,
             "created_at": o.created_at.isoformat()
-        } for o in orders
+        }
+        for o in orders
     ]), 200
+
+# =============================
+# ADMIN AMBIL DATA daftar customer milik user tertentu..
+# =============================  
+@auth_admin_bp.route('/users/<int:user_id>/customers', methods=['GET'])
+@jwt_required()
+def get_customers_by_user(user_id):
+    claims = get_jwt()
+    if claims.get("type") != "admin":
+        return jsonify({"msg": "Admins only"}), 403
+
+    customers = Customer.query.filter_by(user_id=user_id).all()
+    return jsonify([
+        {"id": c.id, "nomer": c.nomer}
+        for c in customers
+    ]), 200
+
+# =============================
+# ADMIN AMBIL DATA semua broadcast yang dibuat oleh user tertentu
+# =============================  
+@auth_admin_bp.route('/users/<int:user_id>/broadcasts', methods=['GET'])
+@jwt_required()
+def get_broadcasts_by_user(user_id):
+    claims = get_jwt()
+    if claims.get("type") != "admin":
+        return jsonify({"msg": "Admins only"}), 403
+
+    broadcasts = Broadcast.query.filter_by(user_id=user_id).order_by(Broadcast.created_at.desc()).all()
+    return jsonify([
+        {
+            "id": b.id,
+            "nomor": b.nomor,
+            "message": b.message,
+            "status": b.status,
+            "created_at": b.created_at.isoformat()
+        }
+        for b in broadcasts
+    ]), 200
+   

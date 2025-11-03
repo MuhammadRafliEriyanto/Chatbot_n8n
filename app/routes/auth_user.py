@@ -10,6 +10,7 @@ from app.models.order import Order
 from app.models.pricing import Pricing
 from app.models.chatbot_log import ChatbotLog
 from app.models.broadcast import Broadcast
+from app.models.customer import Customer
 from flask_jwt_extended import create_access_token
 from flask_mail import Message
 from flask_jwt_extended import jwt_required, get_jwt_identity
@@ -32,7 +33,9 @@ from flask import session
 
 auth_user_bp = Blueprint('auth_user', __name__)
 
-# ===== REGISTER USER =====
+# =============================
+# 1Register Pengguna
+# =============================
 @auth_user_bp.route('/register', methods=['POST'])
 def register_user():
     data = request.get_json()
@@ -76,7 +79,9 @@ def register_user():
 
     return jsonify({"msg": "User registered, please check your email"}), 201
 
-# ===== VERIFY EMAIL =====
+# =============================
+# VERIFIKASI PENGGUNA
+# =============================
 @auth_user_bp.route('/verify/<token>', methods=['GET'])
 def verify_email(token):
     email = confirm_token(token)
@@ -91,7 +96,9 @@ def verify_email(token):
     db.session.commit()
     return jsonify({"msg": "Email verified successfully"}), 200
 
-# ===== LOGIN USER =====
+# =============================
+# LOGIN PENGGUNA
+# =============================
 @auth_user_bp.route('/login', methods=['POST'])
 @api_key_required
 @basic_auth_required
@@ -123,7 +130,9 @@ def login_user():
 
     return jsonify({"msg": "Invalid credentials"}), 401
 
-# ===== FORGOT PASSWORD =====
+# =============================
+# FORGOT PASSWORD PENGGUNA
+# =============================
 @auth_user_bp.route('/forgot-password', methods=['POST'])
 @api_key_required
 def forgot_password():
@@ -150,7 +159,9 @@ def forgot_password():
 
     return jsonify({"msg": "If the email is registered, a reset link will be sent"}), 200
 
-# ===== RESET PASSWORD =====
+# =============================
+# RESET PASSWORD PENGGUNA
+# =============================
 @auth_user_bp.route('/reset-password', methods=['POST'])
 @api_key_required
 def reset_password():
@@ -174,7 +185,9 @@ def reset_password():
 
     return jsonify({"msg": "Password updated successfully"}), 200
 
-# ===== Register Google OAuth =====
+# =============================
+# REGISTER/LOGIN GOOGLE
+# =============================
 google = oauth.register(
     name='google',
     client_id=os.getenv("GOOGLE_CLIENT_ID"),
@@ -258,7 +271,11 @@ def ping():
 
 N8N_WEBHOOK_URL = "https://n8n.gitstraining.com/webhook/chatbotgenius"
 
+# =============================
+# CHATBOT PENGGUNA (AFTER LOGIN)
+# =============================
 @auth_user_bp.route('/chatbot', methods=['POST'])
+@api_key_required
 @jwt_required()
 def chat_with_bot():
     data = request.get_json()
@@ -319,10 +336,11 @@ def chat_with_bot():
         "message": message,
         "response": bot_response
     }), 200
-    
-    
+      
+# =============================
+# CHATBOT PENGGUNA (TANPA LOGIN)
+# =============================
 GUEST_LIMIT = 10  # maksimal 5x chat per session_id
-
 @auth_user_bp.route('/chatbot/guest', methods=['POST'])
 def chat_with_bot_guest():
     data = request.get_json()
@@ -373,7 +391,49 @@ def chat_with_bot_guest():
         "response": bot_response
     }), 200 
     
-# ================= Pricing =================
+# =============================
+# CHATBOT UPLOAD PENGGUNA (Upload file chatbot)
+# =============================
+@auth_user_bp.route('/chatbot/upload', methods=['POST'])
+@api_key_required
+@jwt_required()
+def chatbot_upload():
+    data_name = request.form.get("name")
+    file = request.files.get("file")
+
+    if not data_name or not file:
+        return jsonify({"msg": "Name and file are required"}), 400
+
+    # Buat folder uploads kalau belum ada
+    upload_folder = os.path.join(current_app.root_path, "uploads")
+    os.makedirs(upload_folder, exist_ok=True)
+
+    # Simpan file
+    filename = f"{uuid.uuid4()}_{file.filename}"
+    filepath = os.path.join(upload_folder, filename)
+    file.save(filepath)
+
+    # URL file (pastikan /uploads di-serve static)
+    file_url = f"/uploads/{filename}"
+
+    # Simpan ke DB
+    log = ChatbotLog(
+        name=data_name,
+        file_url=file_url
+    )
+    db.session.add(log)
+    db.session.commit()
+
+    return jsonify({
+        "id": log.id,
+        "name": log.name,
+        "file_url": log.file_url,
+        "created_at": log.created_at.isoformat()
+    }), 201
+        
+# =============================
+# ORDER PENGGUNA (riwayat order user login dari tabel Order)
+# =============================   
 @auth_user_bp.route('/pricing', methods=['GET'])
 def get_pricing():
     plans = Pricing.query.all()
@@ -386,7 +446,9 @@ def get_pricing():
         } for p in plans
     ]), 200
 
-# ================= Checkout =================
+# =============================
+# CHECKOUT PENGGUNA (pengguna beli produk)
+# ============================= 
 @auth_user_bp.route('/checkout', methods=['POST'])
 @jwt_required()
 def checkout():
@@ -459,8 +521,9 @@ def checkout():
             "response": resp_json
         }), 400
 
-
-# ================= Duitku Callback =================
+# =============================
+# Callback Pengguna dari duitku berhasil tidak
+# ============================= 
 @auth_user_bp.route('/duitku/callback', methods=['POST'])
 def duitku_callback():
     data = request.get_json()
@@ -488,7 +551,9 @@ def duitku_callback():
 
     return jsonify({"msg": "Callback processed successfully"}), 200
 
-#---------bisa beli walaupun user baru----------------#
+# =============================
+# OCHECKOUT PENGGUNA (TANPA LOGIN)
+# ============================= 
 @auth_user_bp.route('/checkout/guest', methods=['POST'])
 def guest_checkout():
     data = request.get_json()
@@ -549,7 +614,9 @@ def guest_checkout():
             "response": res_data
         }), 400
 
-# ================= Orders History dan CRUD CUSTOMER =================
+# =============================
+# ORDERS PENGGUNA (RIWAYAT USER ORDER PRODUK) -> OPSIOMAL
+# ============================= 
 @auth_user_bp.route('/orders', methods=['GET'])
 @jwt_required()
 def get_orders():
@@ -565,98 +632,92 @@ def get_orders():
         } for o in orders
     ]), 200
     
-    
-# ================= Update Order (Manual) =================
-@auth_user_bp.route('/orders/<order_id>', methods=['PUT'])
+# =============================
+# Tambah Customer
+# =============================
+@auth_user_bp.route('/customers', methods=['POST'])
+@api_key_required
 @jwt_required()
-def update_order(order_id):
-    user_id = int(get_jwt_identity())
-    order = Order.query.filter_by(order_id=order_id, user_id=user_id).first()
-
-    if not order:
-        return jsonify({"msg": "Order not found"}), 404
-
+def add_customer():
+    current_user_id = get_jwt_identity()
     data = request.get_json()
-    new_status = data.get("status")
 
-    if new_status not in ["pending", "paid", "failed", "expired"]:
-        return jsonify({"msg": "Invalid status value"}), 400
+    nomer = data.get('nomer')
+    if not nomer:
+        return jsonify({'error': 'Nomor customer wajib diisi'}), 400
 
-    order.status = new_status
+    new_customer = Customer(user_id=current_user_id, nomer=nomer)
+    db.session.add(new_customer)
     db.session.commit()
 
     return jsonify({
-        "msg": "Order updated successfully",
-        "order": {
-            "order_id": order.order_id,
-            "status": order.status,
-            "plan_name": order.plan_name,
-            "amount": order.amount,
-            "updated_at": order.created_at.isoformat()
+        'message': 'Customer berhasil ditambahkan',
+        'data': {
+            'id': new_customer.id,
+            'nomer': new_customer.nomer
         }
+    }), 201
+
+# =============================
+# Ambil semua Customer milik user login
+# =============================
+@auth_user_bp.route('/customers', methods=['GET'])
+@api_key_required
+@jwt_required()
+def get_customers():
+    current_user_id = get_jwt_identity()
+    customers = Customer.query.filter_by(user_id=current_user_id).all()
+
+    return jsonify({
+        'total': len(customers),
+        'data': [
+            {'id': c.id, 'nomer': c.nomer}
+            for c in customers
+        ]
     }), 200
 
-
-# ================= Delete Order =================
-@auth_user_bp.route('/orders/<order_id>', methods=['DELETE'])
+# =============================
+# Update Customer (hanya miliknya sendiri)
+# =============================
+@auth_user_bp.route('/customers/<int:id>', methods=['PUT'])
+@api_key_required
 @jwt_required()
-def delete_order(order_id):
-    user_id = int(get_jwt_identity())
-    order = Order.query.filter_by(order_id=order_id, user_id=user_id).first()
+def update_customer(id):
+    current_user_id = get_jwt_identity()
+    customer = Customer.query.filter_by(id=id, user_id=current_user_id).first()
 
-    if not order:
-        return jsonify({"msg": "Order not found"}), 404
+    if not customer:
+        return jsonify({'error': 'Customer tidak ditemukan atau bukan milik Anda'}), 404
 
-    # Hanya boleh hapus order yang belum dibayar
-    if order.status != "pending":
-        return jsonify({"msg": "Only pending orders can be deleted"}), 400
+    data = request.get_json()
+    customer.nomer = data.get('nomer', customer.nomer)
 
-    db.session.delete(order)
+    db.session.commit()
+    return jsonify({'message': 'Customer berhasil diperbarui'}), 200
+
+# =============================
+# Delete Customer (hanya miliknya sendiri)
+# =============================
+@auth_user_bp.route('/customers/<int:id>', methods=['DELETE'])
+@api_key_required
+@jwt_required()
+def delete_customer(id):
+    current_user_id = get_jwt_identity()
+    customer = Customer.query.filter_by(id=id, user_id=current_user_id).first()
+
+    if not customer:
+        return jsonify({'error': 'Customer tidak ditemukan atau bukan milik Anda'}), 404
+
+    db.session.delete(customer)
     db.session.commit()
 
-    return jsonify({"msg": "Order deleted successfully"}), 200
+    return jsonify({'message': 'Customer berhasil dihapus'}), 200
 
-
-# ================= Chatbot =================
-@auth_user_bp.route('/chatbot/upload', methods=['POST'])
-@jwt_required()
-def chatbot_upload():
-    data_name = request.form.get("name")
-    file = request.files.get("file")
-
-    if not data_name or not file:
-        return jsonify({"msg": "Name and file are required"}), 400
-
-    # Buat folder uploads kalau belum ada
-    upload_folder = os.path.join(current_app.root_path, "uploads")
-    os.makedirs(upload_folder, exist_ok=True)
-
-    # Simpan file
-    filename = f"{uuid.uuid4()}_{file.filename}"
-    filepath = os.path.join(upload_folder, filename)
-    file.save(filepath)
-
-    # URL file (pastikan /uploads di-serve static)
-    file_url = f"/uploads/{filename}"
-
-    # Simpan ke DB
-    log = ChatbotLog(
-        name=data_name,
-        file_url=file_url
-    )
-    db.session.add(log)
-    db.session.commit()
-
-    return jsonify({
-        "id": log.id,
-        "name": log.name,
-        "file_url": log.file_url,
-        "created_at": log.created_at.isoformat()
-    }), 201
-    
-
-# ================= Broadcast =================
+# =============================
+# Broadcast Pengguna (Tambah)
+# ============================= 
 @auth_user_bp.route("/broadcast/add", methods=["POST"])
+@api_key_required
 @jwt_required()
 def add_broadcastt():
     data = request.get_json()
@@ -702,8 +763,11 @@ def add_broadcastt():
         print("ERROR DETAIL:", e)
         return jsonify({"success": False, "message": str(e)}), 500
 
-# ================= BroadcastHistori =================
+# =============================
+# Broadcast Pengguna (AMBIL DATA)
+# =============================
 @auth_user_bp.route('/broadcast', methods=['GET'])
+@api_key_required
 @jwt_required()
 def list_broadcast():
     user_id = int(get_jwt_identity())
@@ -719,8 +783,11 @@ def list_broadcast():
         } for b in broadcasts
     ]), 200
 
-# ================= BroadcastUpdate =================
+# =============================
+# Broadcast Pengguna (Update)
+# =============================
 @auth_user_bp.route('/broadcast/<int:broadcast_id>', methods=['PUT'])
+@api_key_required
 @jwt_required()
 def update_broadcast(broadcast_id):
     user_id = int(get_jwt_identity()) 
@@ -731,8 +798,11 @@ def update_broadcast(broadcast_id):
     db.session.commit()
     return jsonify({"msg": "Broadcast updated"}), 200
 
-# ================= BroadcastDelete =================
+# =============================
+# Broadcast Pengguna (DELETE)
+# =============================
 @auth_user_bp.route('/broadcast/<int:broadcast_id>', methods=['DELETE'])
+@api_key_required
 @jwt_required()
 def delete_broadcast(broadcast_id):
     user_id = int(get_jwt_identity())
