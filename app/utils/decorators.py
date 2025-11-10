@@ -4,7 +4,10 @@ import base64
 from functools import wraps
 from flask import request, jsonify,current_app
 
+
+# =============================
 # 🔐 Hash password dengan scrypt
+# =============================
 def hash_password_scrypt(password: str) -> str:
     salt = os.urandom(16)
     hashed = hashlib.scrypt(
@@ -17,7 +20,6 @@ def hash_password_scrypt(password: str) -> str:
     # simpan salt dan hash jadi satu string (dipisahkan tanda $)
     return base64.b64encode(salt).decode() + "$" + base64.b64encode(hashed).decode()
 
-# 🔐 Verifikasi password
 def verify_password_scrypt(password: str, stored: str) -> bool:
     try:
         salt_b64, hash_b64 = stored.split("$")
@@ -35,7 +37,9 @@ def verify_password_scrypt(password: str, stored: str) -> bool:
     except Exception:
         return False
 
-# 🔒 Contoh decorator API key
+# =============================
+# API KEY
+# =============================
 def api_key_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -46,7 +50,9 @@ def api_key_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
-# 🔒 Basic Auth
+# =============================
+# BASIC AUTH
+# =============================
 def basic_auth_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):

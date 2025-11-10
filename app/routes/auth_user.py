@@ -714,6 +714,64 @@ def delete_customer(id):
     return jsonify({'message': 'Customer berhasil dihapus'}), 200
 
 # =============================
+# UPLOAD KE CSV
+# =============================
+@auth_user_bp.route('/customer/uploadcsv', methods=['POST'])
+@jwt_required()
+def upload_csv_customer():
+    try:
+        # Ambil user_id dari token
+        user_id = get_jwt_identity()
+
+        # Cek apakah file ada
+        if "file" not in request.files:
+            return jsonify({"message": "File CSV tidak ditemukan"}), 400
+
+        file = request.files["file"]
+
+        # Validasi extension
+        if not file.filename.endswith('.csv'):
+            return jsonify({"message": "File harus CSV"}), 400
+
+        # Convert file stream ke CSV reader
+        file_stream = io.StringIO(file.stream.read().decode("utf-8"))
+        csv_reader = csv.DictReader(file_stream)
+
+        # Cek apakah kolom "nomer" ada
+        if "nomer" not in csv_reader.fieldnames:
+            return jsonify({"message": "CSV harus memiliki kolom: nomer"}), 400
+
+        rows_added_data = []
+
+        # Loop setiap baris
+        for row in csv_reader:
+            nomer_value = row.get("nomer")
+
+            # Skip baris kosong
+            if not nomer_value or not nomer_value.strip():
+                continue
+
+            # Simpan ke database
+            customer = Customer(
+                user_id=user_id,
+                nomer=nomer_value.strip()
+            )
+            db.session.add(customer)
+            rows_added_data.append({"nomer": nomer_value.strip()})
+
+        # Commit ke DB
+        db.session.commit()
+
+        return jsonify({
+            "message": f"{len(rows_added_data)} customer berhasil ditambahkan",
+            "data": rows_added_data
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"message": str(e)}), 500
+
+# =============================
 # Broadcast Pengguna (Tambah)
 # ============================= 
 @auth_user_bp.route("/broadcast/add", methods=["POST"])
